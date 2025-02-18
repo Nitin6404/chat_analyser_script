@@ -10,9 +10,11 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "chalk": "^5.4.1",
     "dotenv": "^16.4.7",
     "libreoffice-convert": "^1.6.0",
     "ora": "^8.2.0",
+    "pdfkit": "^0.16.0",
     "readline-sync": "^1.4.10"
   }
 }
