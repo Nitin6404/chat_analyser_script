@@ -4,8 +4,8 @@ import libreConvert from "libreoffice-convert";
 import ora from "ora";
 import PDFDocument from "pdfkit";
 import chalk from "chalk";
-import axios from "axios"; // For making HTTP requests to Ollama API
 import dotenv from "dotenv";
+import ollama from "ollama";
 
 dotenv.config();
 
@@ -16,7 +16,6 @@ process.stdout.write("\u001b[0m");
 const SENDER_NAME = process.env.SENDER_NAME;
 const INPUT_FILE = process.env.INPUT_FILE;
 const OUTPUT_FILE = process.env.OUTPUT_FILE || `messages_${SENDER_NAME}`;
-const OLLAMA_API_URL = process.env.OLLAMA_API_URL || "http://localhost:11434/api/generate";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3.2:3b-instruct-q4_K_M";
 
 // Validate environment variables
@@ -29,7 +28,6 @@ if (!SENDER_NAME || !INPUT_FILE || !OUTPUT_FILE) {
 function getSenders(filePath) {
     const data = fs.readFileSync(filePath, "utf-8");
     const senders = new Set();
-
     const lines = data.split("\n");
     lines.forEach((line) => {
         const match = line.match(/^(\d{1,2}\/\d{1,2}\/\d{2,4}, \d{1,2}:\d{2} ?[APM]*) - (.+?): (.+)$/);
@@ -37,7 +35,6 @@ function getSenders(filePath) {
             senders.add(match[2]); // Extract sender's name
         }
     });
-
     return Array.from(senders);
 }
 
@@ -47,20 +44,17 @@ function extractMessages(filePath, sender) {
         const data = fs.readFileSync(filePath, "utf-8");
         const lines = data.split("\n");
         const messages = [];
-
         lines.forEach((line) => {
             const match = line.match(/^(\d{1,2}\/\d{1,2}\/\d{2,4}, \d{1,2}:\d{2} ?[APM]*) - (.+?): (.+)$/);
             if (match) {
                 const timestamp = match[1];
                 const senderFound = match[2];
                 let message = match[3];
-
                 if (senderFound === sender) {
                     messages.push({ timestamp, message });
                 }
             }
         });
-
         return messages;
     } catch (error) {
         console.error(chalk.red("❌ Error reading file:"), error);
@@ -68,25 +62,27 @@ function extractMessages(filePath, sender) {
     }
 }
 
-// AI Analysis Function using Ollama API
-async function analyzeMessagesWithOllama(text, modelName, apiUrl) {
+// AI Analysis Function using Ollama package
+async function analyzeMessagesWithOllama(text, modelName) {
     const aiSpinner = ora("🧠 Analyzing messages with Ollama...").start();
+    let fullResponse = "";
 
     try {
-        console.log("Sending request to Ollama API...");
-        const response = await axios.post(apiUrl, {
+        const response = await ollama.chat({
             model: modelName,
-            prompt: `Analyze this chat data and provide a personality and behavior analysis of the sender. Include chat style, emotional tone, repeated words, and any unique patterns.\n\n${text}`,
+            messages: [{ role: "user", content: `Analyze this chat data and provide a personality and behavior analysis of the sender. Include chat style, emotional tone, repeated words, and any unique patterns.\n\n${text}` }],
         });
 
-        const result = response.data;
+        // Process the response
+        fullResponse = response.text;
         aiSpinner.succeed(chalk.green("✅ AI Analysis Complete!"));
-        return result.response || "No analysis provided.";
     } catch (error) {
         aiSpinner.fail(chalk.red("❌ AI Analysis Failed!"));
-        console.error(error.response?.data || error.message);
+        console.error(error.message);
         return "Analysis could not be performed.";
     }
+
+    return fullResponse || "No analysis provided.";
 }
 
 // Main Execution
@@ -109,7 +105,6 @@ async function analyzeMessagesWithOllama(text, modelName, apiUrl) {
 
     // Extract messages
     const messages = extractMessages(INPUT_FILE, SENDER_NAME);
-
     spinner.succeed(chalk.green("✅ File processing complete!"));
 
     if (messages.length === 0) {
@@ -120,15 +115,14 @@ async function analyzeMessagesWithOllama(text, modelName, apiUrl) {
     // Convert messages to plain text for AI analysis
     const messagesText = messages.map(msg => msg.message).join("\n");
 
-    // Perform AI Analysis
-    const aiAnalysis = await analyzeMessagesWithOllama(messagesText, OLLAMA_MODEL, OLLAMA_API_URL);
+    // Perform AI Analysis using Ollama package
+    const aiAnalysis = await analyzeMessagesWithOllama(messagesText, OLLAMA_MODEL);
 
     console.log(chalk.yellow("\n🧠 AI Personality Analysis:"));
     console.log(chalk.cyan(aiAnalysis));
 
     // Ask for approval
     const approval = readlineSync.question(chalk.cyan("\n✅ Do you approve saving these messages? (yes/no): "));
-
     if (approval.toLowerCase() !== "yes") {
         console.log(chalk.red("❌ Operation canceled."));
         process.exit(0);
@@ -136,7 +130,6 @@ async function analyzeMessagesWithOllama(text, modelName, apiUrl) {
 
     // Save analysis in file
     const fullContent = `🧠 AI Personality Analysis:\n\n${aiAnalysis}\n\n📩 Messages:\n\n${messagesText}`;
-
     if (OUTPUT_FILE.endsWith(".odt")) {
         const buffer = Buffer.from(fullContent, "utf-8");
         libreConvert.convert(buffer, ".odt", undefined, (err, done) => {
