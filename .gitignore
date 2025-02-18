@@ -1,4 +1,7 @@
 .env
 
 /node_modules
-message.txt
+messages.txt
+
+*.odt
+*.txt
